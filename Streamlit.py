@@ -5,6 +5,8 @@ import os
 import warnings
 warnings.filterwarnings('ignore')
 import openpyxl
+import seaborn as sns
+import matplotlib.pyplot as plt
 
 Cleaned_data = pd.read_excel('Global Superstore lite.xlsx')
 st.set_page_config(page_title="Global Superstore", page_icon=":chart_with_upwards_trend:",layout="wide")
@@ -21,6 +23,7 @@ Cleaned_data["Order Date"] = pd.to_datetime(Cleaned_data["Order Date"])
 start_date = Cleaned_data["Order Date"].min()
 end_date = Cleaned_data["Order Date"].max()
 
+
 with col1:
     date1 = st.date_input("Start Date", start_date)
 
@@ -28,6 +31,17 @@ with col2:
     date2 = st.date_input("End Date", end_date)
 
 Cleaned_data = Cleaned_data[(Cleaned_data["Order Date"] >= pd.to_datetime(date1)) & (Cleaned_data["Order Date"] <= pd.to_datetime(date2))].copy()
+
+# Creating two columns layout
+col1, col2 = st.columns(2)
+
+# Summary Card for Total Profit
+total_profit = Cleaned_data['Profit'].sum()
+col1.metric("Total Profit", f"${total_profit:,.2f}")
+
+# Summary Card for Total Profit
+total_sales = Cleaned_data['Sales'].sum()
+col2.metric("Total Sales", f"${total_sales:,.2f}")
 
 SubCategory_df = Cleaned_data.groupby(by = ["Sub-Category"], as_index= False)["Sales"].sum()
 with col1:
@@ -40,21 +54,6 @@ with col2:
     st.subheader("Sales by Region")
     fig = px.pie(Cleaned_data, values = "Sales", names = "Region", hole = 0.5)
     fig.update_traces(text = Cleaned_data["Region"], textposition = "outside")
-    st.plotly_chart(fig,use_container_width=True)
-
-
-
-chart1, chart2 = st.columns((2))
-with chart1:
-    st.subheader('Sales by Ship mode')
-    fig = px.pie(Cleaned_data, values = "Profit", names = "Ship Mode", template = "plotly_dark")
-    fig.update_traces(text = Cleaned_data["Ship Mode"], textposition = "inside")
-    st.plotly_chart(fig,use_container_width=True)
-
-with chart2:
-    st.subheader('Category wise Sales')
-    fig = px.pie(Cleaned_data, values = "Sales", names = "Category", template = "gridon")
-    fig.update_traces(text = Cleaned_data["Category"], textposition = "inside")
     st.plotly_chart(fig,use_container_width=True)
 
 
@@ -104,4 +103,44 @@ with chart2:
 fig_scatter = px.scatter(Cleaned_data, x='Sales', y='Profit', color='Category', title='Sales vs Profit', width=1000, height=600)
 st.plotly_chart(fig_scatter)
 
+#MBA 
+from mlxtend.frequent_patterns import apriori
+from mlxtend.frequent_patterns import association_rules
 
+# Read the cleaned dataset
+Minger_Cleaned_data = Cleaned_data
+
+# Group by 'Order ID' and 'Sub-Category' and count the occurrences of each combination
+basket = (Minger_Cleaned_data.groupby(['Order ID', 'Sub-Category'])['Row ID']
+          .count().unstack().reset_index().fillna(0)
+          .set_index('Order ID'))
+
+# Convert the occurrence counts to binary values (0 or 1)
+basket_sets = basket.applymap(lambda x: 1 if x > 0 else 0)
+
+#Generating frequent itemsets using the Apriori algorithm (Market Basket Analysis)
+frequent_itemsets = apriori(basket_sets, min_support=0.001, use_colnames=True)
+
+# Generate association rules using the frequent itemsets and specify the metric and minimum threshold
+rules = association_rules(frequent_itemsets, metric="lift", min_threshold=1)
+rules = rules[['antecedents', 'consequents', 'antecedent support', 'consequent support', 'support', 'confidence', 'lift']]
+
+
+# Creating an empty DataFrame with bool type
+binary_subcategories = pd.DataFrame(index=basket.index, dtype=bool)
+
+# Iterate over unique sub-categories
+for sub_category in Minger_Cleaned_data['Sub-Category'].unique():
+    # Create a binary column indicating presence of sub-category
+    binary_subcategories[sub_category] = (basket[sub_category] > 0)
+
+# Create a pivot table for the heatmap
+heatmap_data = rules.pivot_table(index='antecedents', columns='consequents', values='lift')
+
+# Plot heatmap
+fig, ax = plt.subplots(figsize=(10, 8))
+sns.heatmap(heatmap_data, annot=True, cmap='coolwarm', fmt=".2f", linewidths=0.5, ax=ax)
+plt.title('Association Rules Heatmap (Lift)')
+plt.xlabel('Consequents')
+plt.ylabel('Antecedents')
+st.pyplot(fig)
